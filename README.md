@@ -15,17 +15,32 @@
 
 ## Структура
 ```
-scripts/download_data.py   — скачивание сырых данных из источника
+scripts/download_data.py   — скачивание сырого дампа из источника
+scripts/parse_pgn.py       — потоковый разбор PGN (.zst) в CSV, по строке на партию
+scripts/analyze_basic.py   — первичная аналитика: сводка и графики
 data/raw/                  — сырые .pgn.zst дампы (не хранятся в git)
+data/processed/            — разобранные CSV (не хранятся в git)
+reports/                   — результаты аналитики: summary.md и графики
 ```
 
 ## Запуск
 ```bash
 pip install -r requirements.txt
-python scripts/download_data.py
+python scripts/download_data.py 2013-01                          # скачать дамп(ы) в data/raw/
+python scripts/parse_pgn.py data/raw/lichess_2013-01.pgn.zst     # -> data/processed/games_2013-01.csv
+python scripts/analyze_basic.py data/processed/games_2013-01.csv # -> reports/
 ```
-Скрипт скачивает месячный PGN-дамп в `data/raw/`. Месяц задаётся переменной `YEAR_MONTH` в начале файла.
+Месяцы передаются аргументами (`python scripts/download_data.py 2013-01 2014-01`), уже скачанные пропускаются.
+Загрузка идёт во временный `.part`-файл, поэтому оборванная загрузка не оставляет битый файл.
+Для больших дампов в `parse_pgn.py` есть `--max-games N`: файл читается потоком и обработка останавливается после N партий.
+
+## Поля CSV
+`game_id, speed, event, result, utc_date, utc_time, white_elo, black_elo, white_diff, black_diff, eco, opening, time_control, base_sec, inc_sec, termination, n_plies, has_eval, has_clock, moves_6`
+
+Имена игроков не сохраняются: для задач проекта они не нужны.
 
 ## Статус
-- [x] Репозиторий создан, первичные данные собраны (09.10)
-- [ ] Полный датасет и ELT-пайплайн (23.10)
+- [x] Репозиторий создан, первичные данные собраны
+- [x] Парсер PGN → CSV, скрипт первичной аналитики
+- [ ] Полный датасет и ELT-пайплайн в PostgreSQL
+- [ ] Анализ по задачам 1–5

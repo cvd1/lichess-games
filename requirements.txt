@@ -1,1 +1,5 @@
 requests
+zstandard
+numpy
+pandas
+matplotlib
