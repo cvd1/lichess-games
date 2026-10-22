@@ -2,8 +2,12 @@
 Потоковый парсер PGN-дампов Lichess -> CSV.
 
 Читает .pgn.zst (или обычный .pgn) построчно, не загружая файл в память,
-и пишет по одной строке на партию: заголовки + несколько вычисленных полей.
+и пишет по одной строке на партию: заголовки + вычисленные поля.
 Имена игроков намеренно не сохраняются: для задач проекта они не нужны.
+
+Для задачи 4 (грубые ошибки) из комментариев `[%eval ...]` считаются оценки
+по ходам и статистика потерь для каждой стороны (см. eval_stats). Остальные
+участники команды работают с готовым CSV и этот файл не меняют.
 
 Пример:
     python scripts/parse_pgn.py data/raw/lichess_2013-01.pgn.zst
@@ -23,10 +27,13 @@ import zstandard
 log = logging.getLogger("parse_pgn")
 
 HEADER_RE = re.compile(r'^\[(\w+) "(.*)"\]\s*$')
-COMMENT_RE = re.compile(r"\{[^}]*\}")
-MOVE_NUM_RE = re.compile(r"\d+\.(\.\.)?")
-NAG_RE = re.compile(r"\$\d+")
+# токены movetext: {комментарий} | $NAG | номер хода | ход/результат
+TOKEN_RE = re.compile(r"\{([^}]*)\}|\$\d+|\d+\.(?:\.\.)?|(\S+)")
+EVAL_RE = re.compile(r"\[%eval\s+(#?-?\d+(?:\.\d+)?)\]")
 RESULTS = {"1-0", "0-1", "1/2-1/2", "*"}
+
+EVAL_CLIP = 1000  # сотых пешки: оценки и мат обрезаются до ±10 пешек
+INACCURACY, MISTAKE, BLUNDER = 50, 100, 200  # порог потери оценки за ход, сотых пешки
 
 COLUMNS = [
     "game_id",
@@ -49,6 +56,17 @@ COLUMNS = [
     "has_eval",
     "has_clock",
     "moves_6",
+    "white_acpl",
+    "black_acpl",
+    "white_evaluated",
+    "black_evaluated",
+    "white_inaccuracies",
+    "white_mistakes",
+    "white_blunders",
+    "black_inaccuracies",
+    "black_mistakes",
+    "black_blunders",
+    "evals",
 ]
 
 
@@ -90,13 +108,58 @@ def parse_time_control(tc: str):
     return int(m.group(1)), int(m.group(2))
 
 
-def analyze_movetext(text: str):
-    """Возвращает (число полуходов, первые 6 полуходов строкой)."""
-    clean = COMMENT_RE.sub(" ", text)
-    clean = NAG_RE.sub(" ", clean)
-    clean = MOVE_NUM_RE.sub(" ", clean)
-    moves = [t for t in clean.split() if t not in RESULTS]
-    return len(moves), " ".join(moves[:6])
+def parse_eval(comment: str):
+    """'[%eval 0.17]' -> 17, '[%eval #-3]' -> -1000 (сотых пешки, с точки зрения белых)."""
+    m = EVAL_RE.search(comment)
+    if not m:
+        return None
+    raw = m.group(1)
+    if raw.startswith("#"):
+        value = EVAL_CLIP if not raw.startswith("#-") else -EVAL_CLIP
+    else:
+        value = round(float(raw) * 100)
+    return max(-EVAL_CLIP, min(EVAL_CLIP, value))
+
+
+def parse_movetext(text: str):
+    """Возвращает (ходы, оценки): оценка[i] - оценка позиции после полухода i или None."""
+    moves, evals = [], []
+    for m in TOKEN_RE.finditer(text):
+        if m.group(1) is not None:  # комментарий относится к предыдущему ходу
+            if moves:
+                evals[-1] = parse_eval(m.group(1))
+        elif m.group(2) and m.group(2) not in RESULTS:
+            moves.append(m.group(2))
+            evals.append(None)
+    return moves, evals
+
+
+def eval_stats(evals):
+    """Потери оценки за ход для каждой стороны.
+
+    Потеря хода = насколько упала оценка с точки зрения ходившего
+    (оценка после предыдущего хода минус оценка после этого; рост не учитывается).
+    Первый ход не считается (нет оценки начальной позиции). Ход считается,
+    только если известны обе оценки. Пороги: неточность >= 50, ошибка >= 100,
+    грубая ошибка >= 200 сотых пешки. Мат приравнен к +-10 пешкам.
+    """
+    stats = {
+        side: {"n": 0, "loss": 0, "inacc": 0, "mist": 0, "blun": 0}
+        for side in ("white", "black")
+    }
+    for i in range(1, len(evals)):
+        prev, cur = evals[i - 1], evals[i]
+        if prev is None or cur is None:
+            continue
+        white_moved = i % 2 == 0
+        loss = max(0, (prev - cur) if white_moved else (cur - prev))
+        st = stats["white" if white_moved else "black"]
+        st["n"] += 1
+        st["loss"] += loss
+        st["inacc"] += INACCURACY <= loss < MISTAKE
+        st["mist"] += MISTAKE <= loss < BLUNDER
+        st["blun"] += loss >= BLUNDER
+    return stats
 
 
 def build_row(headers: dict, movetext: str):
@@ -107,8 +170,22 @@ def build_row(headers: dict, movetext: str):
     if not game_id or result not in RESULTS:
         return None
     base, inc = parse_time_control(headers.get("TimeControl", ""))
-    n_plies, moves_6 = analyze_movetext(movetext)
-    return {
+    moves, evals = parse_movetext(movetext)
+    stats = eval_stats(evals)
+    analyzed = any(e is not None for e in evals)
+
+    def side(name):
+        st = stats[name]
+        has = analyzed and st["n"] > 0
+        return {
+            f"{name}_acpl": round(st["loss"] / st["n"], 1) if has else None,
+            f"{name}_evaluated": st["n"] if has else None,
+            f"{name}_inaccuracies": st["inacc"] if has else None,
+            f"{name}_mistakes": st["mist"] if has else None,
+            f"{name}_blunders": st["blun"] if has else None,
+        }
+
+    row = {
         "game_id": game_id,
         "speed": parse_speed(headers.get("Event", "")),
         "event": headers.get("Event", ""),
@@ -125,11 +202,17 @@ def build_row(headers: dict, movetext: str):
         "base_sec": base,
         "inc_sec": inc,
         "termination": headers.get("Termination", ""),
-        "n_plies": n_plies,
+        "n_plies": len(moves),
         "has_eval": int("[%eval" in movetext),
         "has_clock": int("[%clk" in movetext),
-        "moves_6": moves_6,
+        "moves_6": " ".join(moves[:6]),
+        "evals": ",".join("" if e is None else str(e) for e in evals)
+        if analyzed
+        else "",
     }
+    row.update(side("white"))
+    row.update(side("black"))
+    return row
 
 
 def iter_games(lines):

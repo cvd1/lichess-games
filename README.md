@@ -18,6 +18,7 @@
 scripts/download_data.py   — скачивание сырого дампа из источника
 scripts/parse_pgn.py       — потоковый разбор PGN (.zst) в CSV, по строке на партию
 scripts/analyze_basic.py   — первичная аналитика: сводка и графики
+tests/test_parse_pgn.py    — проверка парсера: python -m tests.test_parse_pgn
 data/raw/                  — сырые .pgn.zst дампы (не хранятся в git)
 data/processed/            — разобранные CSV (не хранятся в git)
 reports/                   — результаты аналитики: summary.md и графики
@@ -36,6 +37,9 @@ python scripts/analyze_basic.py data/processed/games_2013-01.csv # -> reports/
 
 ## Поля CSV
 `game_id, speed, event, result, utc_date, utc_time, white_elo, black_elo, white_diff, black_diff, eco, opening, time_control, base_sec, inc_sec, termination, n_plies, has_eval, has_clock, moves_6`
+
+Для задачи 4 (заполнены только у партий с оценками Stockfish, иначе пусто):
+`white_acpl, black_acpl` – средняя потеря оценки за ход (сотые пешки), `*_evaluated` – сколько ходов учтено, `*_inaccuracies / *_mistakes / *_blunders` – число ходов с потерей ≥50 / ≥100 / ≥200, `evals` – оценка после каждого полухода через запятую (с точки зрения белых, сотые пешки, мат = ±1000).
 
 Имена игроков не сохраняются: для задач проекта они не нужны.
 
