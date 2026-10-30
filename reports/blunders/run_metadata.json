@@ -1,0 +1,49 @@
+{
+  "status": "ok",
+  "inputs": [
+    {
+      "name": "games_2013-01.csv",
+      "bytes": 20931649
+    }
+  ],
+  "parameters": {
+    "out": "reports/blunders",
+    "chunksize": 100000,
+    "speed_source": "time_control",
+    "rating_bin": 200,
+    "min_player_games": 30,
+    "min_evaluated": 100,
+    "speeds": [
+      "ultrabullet",
+      "bullet",
+      "blitz",
+      "rapid",
+      "classical",
+      "correspondence"
+    ]
+  },
+  "quality": {
+    "input_rows": 121332,
+    "missing_id": 0,
+    "unfinished_or_invalid_result": 0,
+    "duplicate_games": 0,
+    "unique_completed": 121332,
+    "speed_mismatches": 39080,
+    "unknown_time_control": 0,
+    "outside_selected_speeds": 0,
+    "selected_games": 121332,
+    "unknown_date": 0,
+    "invalid_n_plies": 0,
+    "invalid_white_elo": 78,
+    "invalid_black_elo": 140,
+    "games_with_eval": 518,
+    "invalid_eval_player_games": 0,
+    "unrated_eval_player_games": 0,
+    "valid_player_games": 1036
+  },
+  "versions": {
+    "numpy": "2.5.4",
+    "pandas": "3.1.0",
+    "matplotlib": "3.11.2"
+  }
+}
